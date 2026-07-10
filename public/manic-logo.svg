@@ -1,0 +1,6 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Manic Trade">
+  <rect width="100" height="100" rx="20" fill="#DB8300"/>
+  <path d="M7 68 L25 41 L39 60 L57 29 L71 49 L93 20"
+        fill="none" stroke="#040404" stroke-width="13"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
