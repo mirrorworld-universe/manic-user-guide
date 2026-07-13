@@ -1,10 +1,10 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { useEffect, useState } from "react"
-import { RiMenuLine, RiCloseLine, RiSearchLine, RiGithubFill, RiArrowDownSLine, RiArrowLeftSLine, RiArrowRightSLine } from "@remixicon/react"
-import { sidebarNav, pageOrder, type NavGroup, type NavLink } from "@/lib/docs-content"
+import { usePathname, useRouter } from "next/navigation"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { RiMenuLine, RiCloseLine, RiSearchLine, RiGithubFill, RiArrowDownSLine, RiArrowLeftSLine, RiArrowRightSLine, RiCornerDownLeftLine } from "@remixicon/react"
+import { sidebarNav, pageOrder, searchIndex, type NavGroup, type NavLink } from "@/lib/docs-content"
 
 const routePart = (href: string) => href.split("#")[0] || "/"
 const hashPart = (href: string) => (href.includes("#") ? href.split("#")[1] : "")
@@ -50,15 +50,146 @@ function SidebarGroup({ group, pathname, activeId }: { group: NavGroup; pathname
   )
 }
 
+function highlight(text: string, terms: string[]) {
+  const esc = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).filter(Boolean)
+  if (!esc.length) return text
+  const re = new RegExp(`(${esc.join("|")})`, "ig")
+  return text.split(re).map((part, i) =>
+    terms.includes(part.toLowerCase()) ? (
+      <mark key={i} className="rounded-sm bg-primary/20 px-0.5 text-primary">
+        {part}
+      </mark>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  )
+}
+
+function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const router = useRouter()
+  const [query, setQuery] = useState("")
+  const [active, setActive] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const terms = useMemo(() => query.trim().toLowerCase().split(/\s+/).filter(Boolean), [query])
+
+  const results = useMemo(() => {
+    if (!terms.length) return []
+    const out: { title: string; section: string; href: string; snippet: string; titleHit: boolean }[] = []
+    for (const d of searchIndex) {
+      const titleHay = (d.title + " " + d.section).toLowerCase()
+      const titleHit = terms.every((t) => titleHay.includes(t))
+      const match = d.passages.find((p) => {
+        const pl = p.toLowerCase()
+        return terms.every((t) => pl.includes(t))
+      })
+      if (!titleHit && !match) continue
+      out.push({ title: d.title, section: d.section, href: d.href, snippet: match ?? d.passages[0], titleHit })
+    }
+    return out.sort((a, b) => Number(b.titleHit) - Number(a.titleHit)).slice(0, 8)
+  }, [terms])
+
+  useEffect(() => {
+    if (!open) return
+    setQuery("")
+    setActive(0)
+    const t = setTimeout(() => inputRef.current?.focus(), 20)
+    return () => clearTimeout(t)
+  }, [open])
+
+  useEffect(() => {
+    setActive(0)
+  }, [query])
+
+  if (!open) return null
+
+  const go = (href: string) => {
+    onClose()
+    router.push(href)
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") onClose()
+    else if (e.key === "ArrowDown") {
+      e.preventDefault()
+      setActive((a) => Math.min(a + 1, results.length - 1))
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault()
+      setActive((a) => Math.max(a - 1, 0))
+    } else if (e.key === "Enter") {
+      e.preventDefault()
+      if (results[active]) go(results[active].href)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh]" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-xl overflow-hidden rounded-lg border border-border bg-popover shadow-2xl" onKeyDown={onKeyDown}>
+        <div className="flex items-center gap-2 border-b border-border px-4">
+          <RiSearchLine className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search the guide…"
+            className="w-full bg-transparent py-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+          />
+          <kbd className="hidden shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline">ESC</kbd>
+        </div>
+
+        {query.trim() && (
+          <div className="max-h-[60vh] overflow-y-auto py-2">
+            {results.length === 0 ? (
+              <p className="px-4 py-6 text-center text-sm text-muted-foreground">No results for &ldquo;{query}&rdquo;.</p>
+            ) : (
+              results.map((r, i) => (
+                <button
+                  key={r.href + i}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => go(r.href)}
+                  className={`flex w-full items-start justify-between gap-3 px-4 py-2.5 text-left ${i === active ? "bg-accent" : ""}`}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline gap-2">
+                      <span className="truncate text-sm font-medium text-foreground">{highlight(r.title, terms)}</span>
+                      <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">{r.section}</span>
+                    </span>
+                    <span className="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">{highlight(r.snippet, terms)}</span>
+                  </span>
+                  {i === active && <RiCornerDownLeftLine className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function DocsShell({ toc, children }: { toc?: { label: string; href: string }[]; children: React.ReactNode }) {
   const pathname = usePathname()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [activeId, setActiveId] = useState("")
+  const [searchOpen, setSearchOpen] = useState(false)
 
   // Close the mobile drawer on route change.
   useEffect(() => {
     setMobileMenuOpen(false)
   }, [pathname])
+
+  // Ctrl/Cmd+K opens search.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setSearchOpen((v) => !v)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
 
   // Scroll-spy: highlight the sidebar leaf / TOC entry for the section in view.
   useEffect(() => {
@@ -91,6 +222,7 @@ export default function DocsShell({ toc, children }: { toc?: { label: string; hr
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       {/* Navbar */}
       <header className="fixed left-0 right-0 top-0 z-50 border-b border-border bg-background">
         <div className="flex h-14 items-center px-4 lg:px-6">
@@ -100,7 +232,7 @@ export default function DocsShell({ toc, children }: { toc?: { label: string; hr
             <span className="font-druk text-sm uppercase tracking-wide text-foreground">Manic</span>
           </Link>
 
-          <button className="ml-4 flex items-center gap-2 rounded-md border border-border bg-secondary px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground">
+          <button onClick={() => setSearchOpen(true)} className="ml-4 flex items-center gap-2 rounded-md border border-border bg-secondary px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground">
             <RiSearchLine className="h-4 w-4" />
             <span className="hidden sm:inline">Search</span>
             <kbd className="ml-4 hidden rounded border border-border bg-background px-1.5 py-0.5 text-xs font-medium sm:inline">Ctrl K</kbd>
